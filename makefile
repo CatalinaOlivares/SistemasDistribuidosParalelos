@@ -1,13 +1,22 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -O2
-LDFLAGS = -lm
+# Nombre de tu programa
+PROGRAMA = dilation
 
-TARGET = dilation
+# Opciones de compilación
+CFLAGS = -Wall -Wextra -O2 -lm
 
-all: $(TARGET)
+# Archivos fuente
+FUENTE = dilation.c
 
-$(TARGET): dilation.c
-	$(CC) $(CFLAGS) -o $(TARGET) dilation.c $(LDFLAGS)
+# Regla por defecto: compila y ejecuta el comando
+all: $(PROGRAMA)
+	./$(PROGRAMA) -i bike.pgm -s imagen_salida1.pgm -p imagen_salida2.pgm -N 512
 
+# Compila el programa
+$(PROGRAMA): $(FUENTE)
+	gcc $(CFLAGS) -o $(PROGRAMA) $(FUENTE)
+
+# Limpia los archivos generados
 clean:
-	rm -f $(TARGET)
+	rm -f $(PROGRAMA)
+
+.PHONY: all clean
