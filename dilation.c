@@ -5,15 +5,42 @@
 #include <emmintrin.h> // Para instrucciones SSE
 #include <time.h>      // Para medir el tiempo con clock()
 
-// Función para aplicar dilatación en una vecindad de 4 vecinos
-int dilatacion(__m128i vecindad[3]) {
+// Función para aplicar dilatación en una vecindad de 5 píxeles
+int dilatacion(__m128i vecindad[4]) {
     __m128i maximo = vecindad[0];
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         maximo = _mm_max_epu8(maximo, vecindad[i]);
     }
     return _mm_extract_epi16(maximo, 0);
 }
+// Función para aplicar dilatación en una vecindad de 5 píxeles de forma secuencial
+unsigned char dilatacion_secuencial(unsigned char vecindad[5]) {
+    unsigned char maximo = vecindad[0];
+    for (int i = 1; i < 5; i++) {
+        if (vecindad[i] > maximo) {
+            maximo = vecindad[i];
+        }
+    }
+    return maximo;
+}
 
+void llenarVecindad(__m128i vecindad[5], const unsigned char *imagen, int i, int j, int ancho, int alto) {
+    for (int x = -1; x <= 2; x++) {
+        for (int y = -1; y <= 1; y++) {
+            // Calcula las coordenadas
+            int newX = i + x;
+            int newY = j + y;
+
+            // Verifica si las coordenadas están dentro de los límites de la imagen
+            if (newX >= 0 && newX < ancho && newY >= 0 && newY < alto) {
+                vecindad[(x + 1) * 4 + (y + 1)] = _mm_set1_epi8(imagen[newX * alto + newY]);
+            } else {
+                // Si está fuera de los límites, asigna un valor adecuado o lo que corresponda
+                vecindad[(x + 1) * 4 + (y + 1)] = _mm_setzero_si128(); // Por ejemplo, asigna cero
+            }
+        }
+    }
+}
 void guardarImagenPGM(const char *nombreArchivo, unsigned char *imagen, int ancho, int alto) {
     FILE *archivo = fopen(nombreArchivo, "wb");
     if (!archivo) {
@@ -100,20 +127,23 @@ int main(int argc, char *argv[]) {
     clock_t inicio_secuencial = clock();
 
     // Proceso de dilatación de forma secuencial
-    unsigned char *imagen_dilatada_secuencial = (unsigned char *)malloc(ancho * alto);
+unsigned char *imagen_dilatada_secuencial = (unsigned char *)malloc(ancho * alto);
 
-    for (int i = 1; i < ancho - 1; i++) {
-        for (int j = 1; j < alto - 1; j++) {
-            __m128i vecindad[3];
-            // Llena la vecindad con los píxeles circundantes
-            for (int x = -1; x <= 1; x++) {
-                vecindad[x + 1] = _mm_set1_epi8(imagen[(i + x) * alto + (j - 1)]);
-            }
-            // Aplica la dilatación y guarda el resultado en la imagen dilatada
-            imagen_dilatada_secuencial[i * alto + j] = dilatacion(vecindad);
-        }
+for (int i = 1; i < ancho - 1; i++) {
+    for (int j = 1; j < alto - 1; j++) {
+        unsigned char vecindad_secuencial[5];
+        // Llena la vecindad con los píxeles circundantes de forma secuencial
+        vecindad_secuencial[0] = imagen[(i - 1) * alto + (j - 1)];
+        vecindad_secuencial[1] = imagen[(i - 1) * alto + j];
+        vecindad_secuencial[2] = imagen[i * alto + (j - 1)];
+        vecindad_secuencial[3] = imagen[i * alto + j];
+        vecindad_secuencial[4] = imagen[(i + 1) * alto + (j + 1)]; // Agregar el píxel central
+
+        // Aplica la dilatación de forma secuencial y guarda el resultado
+        imagen_dilatada_secuencial[i * alto + j] = dilatacion_secuencial(vecindad_secuencial);
     }
-    
+}
+
     guardarImagenPGM(imagen_salida1, imagen_dilatada_secuencial, ancho, alto);
     //liberar memoria
     free(imagen_dilatada_secuencial);
@@ -124,33 +154,61 @@ int main(int argc, char *argv[]) {
 
     // Imprimir los tiempo transcurrido
     printf("Tiempo transcurrido secuencial: %f segundos\n", tiempo_transcurrido_secuencial);
-    
-    //Proceso de dilatación de forma paralela con un solo máximo
+
+
+
+
+
+ // Parte paralela
     unsigned char *imagen_dilatada_paralela = (unsigned char *)malloc(ancho * alto);
-    // Medir el tiempo de inicio para la segunda parte
-    clock_t inicio_paralela = clock();
+
+    
+
+    __m128i vecindad[5]; // Declara vecindad una vez fuera del bucle anidado
+
+    // Crear una matriz para almacenar las vecindades
+    __m128i **vecindades = malloc((ancho - 2) * sizeof(__m128i *));
+    for (int i = 0; i < ancho - 2; i++) {
+        vecindades[i] = malloc((alto - 2) * sizeof(__m128i));
+    }
+
+    // Llenar las vecindades de manera eficiente antes del bucle principal
     for (int i = 1; i < ancho - 1; i++) {
         for (int j = 1; j < alto - 1; j++) {
-            __m128i vecindad[4]; // Para los 4 vecinos
-            // Llena la vecindad con los píxeles circundantes
-            for (int x = -1; x <= 2; x++) {
-                vecindad[x + 1] = _mm_set1_epi8(imagen[(i + x) * alto + (j - 1)]);
-            }
+            llenarVecindad(vecindad, imagen, i, j, ancho, alto);
+            // Almacenar la vecindad en la matriz de vecindades
+            vecindades[i - 1][j - 1] = vecindad[0]; // Puedes elegir cualquier elemento de la vecindad
+        }
+    }
+// Medir el tiempo de inicio para la parte paralela
+    clock_t inicio_paralela = clock();
+    // Bucle principal utilizando la matriz de vecindades
+    for (int i = 1; i < ancho - 1; i++) {
+        for (int j = 1; j < alto - 1; j++) {
+            // Obtener la vecindad desde la matriz de vecindades
+            __m128i *vecindad_actual = &vecindades[i - 1][j - 1];
 
-            // Aplica la dilatación a los 4 vecinos en un solo paso
-            __m128i resultado = _mm_max_epu8(_mm_max_epu8(vecindad[0], vecindad[1]), _mm_max_epu8(vecindad[2], vecindad[3]));
+            // Calcula resultado con la vecindad llena
+            __m128i resultado = _mm_max_epu8(_mm_max_epu8(vecindad_actual[0], vecindad_actual[1]),
+                                              _mm_max_epu8(vecindad_actual[2], _mm_max_epu8(vecindad_actual[3], vecindad_actual[4])));
 
-            // Guarda el resultado en la imagen dilatada
+            // Guarda el resultado en la imagen dilatada en paralelo
             imagen_dilatada_paralela[i * alto + j] = _mm_extract_epi16(resultado, 0);
         }
     }
     clock_t fin_paralela = clock();
+
     // Calcular el tiempo transcurrido en segundos para la segunda parte
     double tiempo_transcurrido_paralela = (double)(fin_paralela - inicio_paralela) / CLOCKS_PER_SEC;
     guardarImagenPGM(imagen_salida2, imagen_dilatada_paralela, ancho, alto);
     // Imprimir los tiempo transcurrido
     printf("Tiempo transcurrido paralelamente: %f segundos\n", tiempo_transcurrido_paralela);
     free(imagen_dilatada_paralela);
+    // Liberar la memoria de la matriz de vecindades
+    for (int i = 0; i < ancho - 2; i++) {
+        free(vecindades[i]);
+    }
+    free(vecindades);
     // Liberar la memoria
     free(imagen);
 
