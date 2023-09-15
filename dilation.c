@@ -197,18 +197,18 @@ for (int i = 1; i < ancho - 1; i++) {
         }
     }
     clock_t fin_paralela = clock();
-
+    // Liberar la memoria de la matriz de vecindades
+    for (int i = 0; i < ancho - 2; i++) {
+        free(vecindades[i]);
+    }
+    free(vecindades);
     // Calcular el tiempo transcurrido en segundos para la segunda parte
     double tiempo_transcurrido_paralela = (double)(fin_paralela - inicio_paralela) / CLOCKS_PER_SEC;
     guardarImagenPGM(imagen_salida2, imagen_dilatada_paralela, ancho, alto);
     // Imprimir los tiempo transcurrido
     printf("Tiempo transcurrido paralelamente: %f segundos\n", tiempo_transcurrido_paralela);
     free(imagen_dilatada_paralela);
-    // Liberar la memoria de la matriz de vecindades
-    for (int i = 0; i < ancho - 2; i++) {
-        free(vecindades[i]);
-    }
-    free(vecindades);
+    
     // Liberar la memoria
     free(imagen);
 
